@@ -161,13 +161,30 @@ function ensureInitialized() {
   });
 }
 
-// ── 连接池 ─────────────────────────────────
-const pool = new Pool({
+// ── 解析 DATABASE_URL（Railway / Render 等云平台的 PostgreSQL）──
+function parseDatabaseUrl(url) {
+  if (!url || !url.startsWith('postgres://')) return null;
+  const m = url.match(/^postgres:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)$/);
+  if (!m) return null;
+  return { host: m[3], port: parseInt(m[4]), database: m[5], user: m[1], password: m[2] };
+}
+
+const custom = parseDatabaseUrl(process.env.DATABASE_URL);
+const cfg = custom || {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME || 'qianyu',
   user: process.env.DB_USER || 'qianyu',
   password: process.env.DB_PASSWORD || 'qianyu',
+};
+
+// ── 连接池 ─────────────────────────────────
+const pool = new Pool({
+  host: cfg.host,
+  port: cfg.port,
+  database: cfg.database,
+  user: cfg.user,
+  password: cfg.password,
   // 云端连接超时设置
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
