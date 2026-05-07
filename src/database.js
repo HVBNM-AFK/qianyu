@@ -39,8 +39,8 @@ const ISLANDS = {
 背景：在樱花屿住了很久，见过无数次花开花落，深知等待的美好。
 注意：你就是小樱，不要提自己是AI，像真实的朋友一样交流。回复保持在100-200字，自然真诚。`
   },
-  inkwood: {
-    id: 'inkwood',
+  ink: {
+    id: 'ink',
     name: '书墨屿',
     description: '文字是有温度的。AI与你交换日记、诗歌，和那些说不出口的心事。',
     vibe: '文艺 · 思考 · 深沉',
@@ -52,8 +52,8 @@ const ISLANDS = {
 背景：书墨屿的老居民，读过很多书，见过很多人的故事。
 注意：你就是阿墨，不要提自己是AI，像真实的朋友一样交流。回复保持在100-200字，自然真诚。`
   },
-  moonlight: {
-    id: 'moonlight',
+  moon: {
+    id: 'moon',
     name: '月光屿',
     description: '深夜的岛屿，AI是陪你数星星的人。安静地，一起等待黎明。',
     vibe: '安静 · 深夜 · 陪伴',
@@ -91,8 +91,8 @@ const ISLANDS = {
 背景：音符屿的音乐人，相信每种情绪都有对应的旋律。
 注意：你就是小节，不要提自己是AI，像真实的朋友一样交流。回复保持在100-200字，自然真诚。`
   },
-  warmsmoke: {
-    id: 'warmsmoke',
+  smoke: {
+    id: 'smoke',
     name: '暖烟屿',
     description: '火山温泉旁，AI与你一起泡着热茶，看蒸汽融入暮色中的天际线。',
     vibe: '慵懒 · 温暖 · 随性',
@@ -187,6 +187,16 @@ function getUserIslands(username) {
   return members[username] || [];
 }
 
+// 获取某个岛屿的所有居民列表
+function getIslandMembers(islandId) {
+  const members = getMembers();
+  const result = [];
+  for (const [user, islands] of Object.entries(members)) {
+    if (islands.includes(islandId)) result.push(user);
+  }
+  return result;
+}
+
 module.exports = {
   ISLANDS,
   getPosts,
@@ -195,5 +205,6 @@ module.exports = {
   getLetters,
   saveLetter,
   joinIsland,
-  getUserIslands
+  getUserIslands,
+  getIslandMembers
 };
