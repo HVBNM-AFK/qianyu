@@ -140,7 +140,7 @@ body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(
 <div class="modal" id="av-modal"><div class="sheet"><h3>选择头像</h3><div style="display:flex;gap:8px;margin-bottom:10px;"><label class="sheet-btn" style="cursor:pointer;">📷 上传图片<input type="file" accept="image/*" style="display:none;" onchange="uploadAvatar(this)"></label></div><div class="av-grid" id="av-grid"></div></div></div>
 
 <script>
-const API='http://localhost:3457/api';
+const API=location.origin+'/api';
 const L=(k,d)=>{try{let v=localStorage.getItem('qy_'+k);return v?JSON.parse(v):d}catch{return d}}
 const S=(k,v)=>{try{localStorage.setItem('qy_'+k,JSON.stringify(v))}catch{}}
 const $=id=>document.getElementById(id);

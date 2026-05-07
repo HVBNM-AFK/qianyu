@@ -163,6 +163,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`🌊 千屿 API Server → http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🌊 千屿 API Server → http://0.0.0.0:${PORT}`);
 });
