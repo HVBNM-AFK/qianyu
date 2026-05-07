@@ -1,0 +1,24 @@
+# ──────────────────────────────
+# 千屿 API Server · Docker 构建
+# ──────────────────────────────
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# 安装依赖
+COPY package*.json ./
+RUN npm ci --only=production
+
+# 拷贝源码
+COPY . .
+
+# 暴露 API 端口
+EXPOSE 3457
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3457/api/islands || exit 1
+
+# 启动 API 服务
+CMD ["node", "src/api.js"]

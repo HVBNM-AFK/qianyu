@@ -1,0 +1,63 @@
+services:
+  # ──────────────────────────────
+  # PostgreSQL · 数据库
+  # ──────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: qianyu-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-qianyu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-qianyu}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - qianyu-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qianyu} -d ${POSTGRES_DB:-qianyu}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - qianyu-net
+
+  # ──────────────────────────────
+  # 千屿 API Server · 前端接口
+  # ──────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: qianyu-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-qianyu}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      DB_NAME: ${POSTGRES_DB:-qianyu}
+      PORT: 3457
+      NODE_ENV: production
+    ports:
+      - "${API_PORT:-3457}:3457"
+    networks:
+      - qianyu-net
+
+# ──────────────────────────────
+# Volumes · 数据持久化
+# ──────────────────────────────
+volumes:
+  qianyu-data:
+    driver: local
+
+# ──────────────────────────────
+# Networks · 内部通信
+# ──────────────────────────────
+networks:
+  qianyu-net:
+    driver: bridge

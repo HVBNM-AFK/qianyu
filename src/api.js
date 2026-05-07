@@ -5,7 +5,8 @@
 const http = require('http');
 const db = require('./database');
 
-const PORT = 3457;
+// 云服务器需要监听所有网卡，端口从环境变量读取
+const PORT = process.env.PORT || 3457;
 
 function json(res, data, status = 200) {
   res.writeHead(status, {
@@ -72,7 +73,7 @@ const server = http.createServer(async (req, res) => {
       const limit = parseInt(url.searchParams.get('limit') || '10');
       const all = [];
       for (const id of Object.keys(db.ISLANDS)) {
-        const posts = db.getPosts(id);
+        const posts = await db.getPosts(id);
         for (const p of posts) all.push(p);
       }
       all.sort((a, b) => b.id - a.id);
@@ -94,7 +95,7 @@ const server = http.createServer(async (req, res) => {
       const id = joinMatch[1];
       if (!db.ISLANDS[id]) return json(res, { error: '岛屿不存在' }, 404);
       const data = await body(req);
-      const isNew = db.joinIsland(data.username, id);
+      const isNew = await db.joinIsland(data.username, id);
       return json(res, { success: true, is_new: isNew });
     }
 
@@ -105,11 +106,11 @@ const server = http.createServer(async (req, res) => {
       if (!db.ISLANDS[id]) return json(res, { error: '岛屿不存在' }, 404);
 
       if (req.method === 'GET') {
-        return json(res, db.getPosts(id));
+        return json(res, await db.getPosts(id));
       }
       if (req.method === 'POST') {
         const data = await body(req);
-        const post = db.createPost(id, data.author, data.content, data.title || '');
+        const post = await db.createPost(id, data.author, data.content, data.title || '');
         return json(res, post);
       }
     }
@@ -122,12 +123,12 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === 'GET') {
         const username = url.searchParams.get('user') || '';
-        return json(res, db.getLetters(id, username));
+        return json(res, await db.getLetters(id, username));
       }
       if (req.method === 'POST') {
         const data = await body(req);
         const reply = aiReply(id, data.content);
-        db.saveLetter(id, data.username, data.content, reply);
+        await db.saveLetter(id, data.username, data.content, reply);
         return json(res, { success: true, ai_reply: reply, ai_name: db.ISLANDS[id].ai_name });
       }
     }
@@ -136,7 +137,7 @@ const server = http.createServer(async (req, res) => {
     const commentMatch = path.match(/^\/api\/posts\/(\d+)\/comments$/);
     if (commentMatch && req.method === 'POST') {
       const data = await body(req);
-      const comment = db.addComment(data.island_id, parseInt(commentMatch[1]), data.author, data.content, data.is_ai || false);
+      const comment = await db.addComment(data.island_id, parseInt(commentMatch[1]), data.author, data.content, data.is_ai || false);
       if (!comment) return json(res, { error: '帖子不存在' }, 404);
       return json(res, comment);
     }
@@ -144,7 +145,7 @@ const server = http.createServer(async (req, res) => {
     // ── 我的岛屿 ──
     const myMatch = path.match(/^\/api\/user\/(.+)\/islands$/);
     if (myMatch && req.method === 'GET') {
-      return json(res, db.getUserIslands(decodeURIComponent(myMatch[1])));
+      return json(res, await db.getUserIslands(decodeURIComponent(myMatch[1])));
     }
 
     // ── 岛屿居民列表 ──
@@ -152,7 +153,7 @@ const server = http.createServer(async (req, res) => {
     if (membersMatch && req.method === 'GET') {
       const id = membersMatch[1];
       if (!db.ISLANDS[id]) return json(res, { error: '岛屿不存在' }, 404);
-      return json(res, db.getIslandMembers(id));
+      return json(res, await db.getIslandMembers(id));
     }
 
     json(res, { error: 'Not Found' }, 404);

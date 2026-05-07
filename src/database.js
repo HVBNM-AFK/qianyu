@@ -1,30 +1,14 @@
 /**
  * 千屿 · 数据层
- * 用 JSON 文件存储数据，零依赖，部署简单
+ * PostgreSQL 数据库，支持多用户数据隔离
+ * 每个岛屿的数据独立，用户通过 username 隔离
  */
-const fs = require('fs');
+const { Pool } = require('pg');
 const path = require('path');
 
-const DATA_DIR = path.resolve(__dirname, '..', 'data');
-// 如果 data 目录不存在再创建
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+// 加载环境变量
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-// 确保 data 目录存在
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-// 读写 JSON 文件
-function readJSON(filename) {
-  const file = path.join(DATA_DIR, filename);
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf-8'));
-}
-
-function writeJSON(filename, data) {
-  const file = path.join(DATA_DIR, filename);
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-// ── 岛屿数据（固定配置）──────────────────
 const ISLANDS = {
   sakura: {
     id: 'sakura',
@@ -106,105 +90,241 @@ const ISLANDS = {
   }
 };
 
-// ── 帖子操作 ─────────────────────────────
-function getPosts(islandId) {
-  return readJSON(`posts_${islandId}.json`) || [];
-}
+// ── 初始化数据库 ─────────────────────────────────
+function ensureInitialized() {
+  if (ensureInitialized.done) return Promise.resolve();
+  ensureInitialized.done = true;
 
-function savePosts(islandId, posts) {
-  writeJSON(`posts_${islandId}.json`, posts);
-}
+  return pool.query(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id          BIGINT PRIMARY KEY,
+      island_id   TEXT NOT NULL,
+      author      TEXT NOT NULL,
+      is_ai       BOOLEAN DEFAULT FALSE,
+      title       TEXT DEFAULT '',
+      content     TEXT NOT NULL,
+      created_at  TIMESTAMP DEFAULT NOW()
+    );
 
-function createPost(islandId, author, content, title = '') {
-  const posts = getPosts(islandId);
-  const post = {
-    id: Date.now(),
-    island_id: islandId,
-    author,
-    is_ai: false,
-    title,
-    content,
-    comments: [],
-    created_at: new Date().toISOString()
-  };
-  posts.unshift(post);
-  savePosts(islandId, posts);
-  return post;
-}
+    CREATE INDEX IF NOT EXISTS idx_posts_island ON posts(island_id);
+    CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 
-function addComment(islandId, postId, author, content, isAi = false) {
-  const posts = getPosts(islandId);
-  const post = posts.find(p => p.id === postId);
-  if (!post) return null;
-  const comment = {
-    id: Date.now(),
-    author,
-    is_ai: isAi,
-    content,
-    created_at: new Date().toISOString()
-  };
-  post.comments.push(comment);
-  savePosts(islandId, posts);
-  return comment;
-}
+    CREATE TABLE IF NOT EXISTS comments (
+      id          BIGINT PRIMARY KEY,
+      post_id     BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      island_id   TEXT NOT NULL,
+      author      TEXT NOT NULL,
+      is_ai       BOOLEAN DEFAULT FALSE,
+      content     TEXT NOT NULL,
+      created_at  TIMESTAMP DEFAULT NOW()
+    );
 
-// ── 信件操作 ─────────────────────────────
-function getLetters(islandId, username) {
-  const all = readJSON(`letters_${islandId}.json`) || [];
-  return all.filter(l => l.from_user === username);
-}
+    CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id);
 
-function saveLetter(islandId, fromUser, content, aiReply) {
-  const all = readJSON(`letters_${islandId}.json`) || [];
-  all.unshift({
-    id: Date.now(),
-    from_user: fromUser,
-    content,
-    ai_reply: aiReply,
-    created_at: new Date().toISOString()
+    CREATE TABLE IF NOT EXISTS letters (
+      id          BIGINT PRIMARY KEY,
+      island_id   TEXT NOT NULL,
+      from_user   TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      ai_reply    TEXT,
+      ai_name     TEXT,
+      created_at  TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_letters_island_user ON letters(island_id, from_user);
+
+    CREATE TABLE IF NOT EXISTS members (
+      id          BIGSERIAL PRIMARY KEY,
+      username    TEXT NOT NULL,
+      avatar      TEXT DEFAULT '',
+      nickname    TEXT NOT NULL,
+      islands     TEXT[] DEFAULT '{}',
+      created_at  TIMESTAMP DEFAULT NOW(),
+      UNIQUE(username)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_members_username ON members(username);
+
+    CREATE TABLE IF NOT EXISTS island_membership (
+      id          BIGSERIAL PRIMARY KEY,
+      username    TEXT NOT NULL,
+      island_id   TEXT NOT NULL,
+      joined_at   TIMESTAMP DEFAULT NOW(),
+      UNIQUE(username, island_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_membership_island ON island_membership(island_id);
+  `).then(() => {
+    console.log('✅ 数据库表初始化完成');
+  }).catch(err => {
+    console.error('❌ 数据库初始化失败:', err.message);
   });
-  writeJSON(`letters_${islandId}.json`, all);
 }
 
-// ── 居民关系 ─────────────────────────────
-function getMembers() {
-  return readJSON('members.json') || {};
+// ── 连接池 ─────────────────────────────────
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME || 'qianyu',
+  user: process.env.DB_USER || 'qianyu',
+  password: process.env.DB_PASSWORD || 'qianyu',
+  // 云端连接超时设置
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
+});
+
+// 健康检查
+pool.on('error', (err) => {
+  console.error('❌ 数据库连接池错误:', err.message);
+  process.exit(1);
+});
+
+// ── 帖子操作（按岛屿隔离）──────────────────────
+async function getPosts(islandId, limit = 100) {
+  const { rows } = await pool.query(
+    'SELECT id, island_id, author, is_ai, title, content, created_at FROM posts WHERE island_id = $1 ORDER BY id DESC LIMIT $2',
+    [islandId, limit]
+  );
+  return rows;
 }
 
-function joinIsland(username, islandId) {
-  const members = getMembers();
-  if (!members[username]) members[username] = [];
-  if (!members[username].includes(islandId)) {
-    members[username].push(islandId);
-    writeJSON('members.json', members);
-    return true; // 新加入
-  }
-  return false; // 已经是居民
+async function createPost(islandId, author, content, title = '') {
+  const id = Date.now();
+  await pool.query(
+    'INSERT INTO posts (id, island_id, author, title, content) VALUES ($1, $2, $3, $4, $5)',
+    [id, islandId, author, title, content]
+  );
+  return { id, island_id: islandId, author, is_ai: false, title, content, created_at: new Date().toISOString() };
 }
 
-function getUserIslands(username) {
-  const members = getMembers();
-  return members[username] || [];
+async function getPostComments(islandId, postId) {
+  const { rows } = await pool.query(
+    'SELECT id, post_id, author, is_ai, content, created_at FROM comments WHERE post_id = $1 ORDER BY id ASC',
+    [postId]
+  );
+  return rows;
 }
 
-// 获取某个岛屿的所有居民列表
-function getIslandMembers(islandId) {
-  const members = getMembers();
-  const result = [];
-  for (const [user, islands] of Object.entries(members)) {
-    if (islands.includes(islandId)) result.push(user);
-  }
-  return result;
+// ── 评论操作（关联帖子和岛屿）────────────────────
+async function addComment(islandId, postId, author, content, isAi = false) {
+  // 先检查帖子是否存在
+  const postCheck = await pool.query('SELECT id FROM posts WHERE id = $1 AND island_id = $2', [postId, islandId]);
+  if (postCheck.rows.length === 0) return null;
+
+  const id = Date.now();
+  await pool.query(
+    'INSERT INTO comments (id, post_id, island_id, author, is_ai, content) VALUES ($1, $2, $3, $4, $5, $6)',
+    [id, postId, islandId, author, isAi, content]
+  );
+  return { id, post_id: postId, author, is_ai: isAi, content, created_at: new Date().toISOString() };
+}
+
+// ── 信件操作（按用户+岛屿隔离）────────────────────
+async function getLetters(islandId, username) {
+  const { rows } = await pool.query(
+    'SELECT id, island_id, from_user, content, ai_reply, ai_name, created_at FROM letters WHERE island_id = $1 AND from_user = $2 ORDER BY id DESC',
+    [islandId, username]
+  );
+  return rows;
+}
+
+async function saveLetter(islandId, fromUser, content, aiReply) {
+  const id = Date.now();
+  const island = ISLANDS[islandId];
+  await pool.query(
+    'INSERT INTO letters (id, island_id, from_user, content, ai_reply, ai_name) VALUES ($1, $2, $3, $4, $5, $6)',
+    [id, islandId, fromUser, content, aiReply, island ? island.ai_name : null]
+  );
+  return { id, island_id: islandId, from_user: fromUser, content, ai_reply: aiReply, created_at: new Date().toISOString() };
+}
+
+// ── 用户/成员管理（全局隔离）─────────────────────
+async function getUserInfo(username) {
+  const { rows } = await pool.query(
+    'SELECT id, username, avatar, nickname, islands, created_at FROM members WHERE username = $1',
+    [username]
+  );
+  return rows[0] || null;
+}
+
+async function createUser(username, nickname, avatar = '') {
+  const result = await pool.query(
+    `INSERT INTO members (username, nickname, avatar) VALUES ($1, $2, $3)
+     ON CONFLICT (username) DO UPDATE SET nickname = EXCLUDED.nickname, avatar = EXCLUDED.avatar
+     RETURNING *`,
+    [username, nickname, avatar]
+  );
+  return result.rows[0];
+}
+
+async function updateUserNickname(username, nickname) {
+  await pool.query('UPDATE members SET nickname = $1 WHERE username = $2', [nickname, username]);
+}
+
+async function updateUserAvatar(username, avatar) {
+  await pool.query('UPDATE members SET avatar = $1 WHERE username = $2', [avatar, username]);
+}
+
+async function joinIsland(username, islandId) {
+  // 使用 UPSERT，如果已经加入过则返回 false
+  const result = await pool.query(
+    `INSERT INTO island_membership (username, island_id) VALUES ($1, $2)
+     ON CONFLICT (username, island_id) DO NOTHING
+     RETURNING id`,
+    [username, islandId]
+  );
+  return result.rows.length > 0; // true = 新加入，false = 已加入
+}
+
+async function getUserIslands(username) {
+  const { rows } = await pool.query(
+    'SELECT island_id FROM island_membership WHERE username = $1',
+    [username]
+  );
+  return rows.map(r => r.island_id);
+}
+
+async function getIslandMembers(islandId) {
+  const { rows } = await pool.query(
+    `SELECT m.username, m.nickname, m.avatar 
+     FROM members m
+     JOIN island_membership im ON m.username = im.username
+     WHERE im.island_id = $1
+     ORDER BY im.joined_at DESC`,
+    [islandId]
+  );
+  return rows;
+}
+
+// ── 帖子详情（含评论）────────────────────────
+async function getPostWithComments(postId, islandId) {
+  const postResult = await pool.query(
+    'SELECT id, island_id, author, is_ai, title, content, created_at FROM posts WHERE id = $1 AND island_id = $2',
+    [postId, islandId]
+  );
+  if (postResult.rows.length === 0) return null;
+
+  const comments = await getPostComments(islandId, postId);
+  const post = postResult.rows[0];
+  return { ...post, comments };
 }
 
 module.exports = {
   ISLANDS,
+  pool,
+  ensureInitialized,
   getPosts,
   createPost,
+  getPostComments,
   addComment,
   getLetters,
   saveLetter,
+  getUserInfo,
+  createUser,
+  updateUserNickname,
+  updateUserAvatar,
   joinIsland,
   getUserIslands,
-  getIslandMembers
+  getIslandMembers,
+  getPostWithComments
 };
